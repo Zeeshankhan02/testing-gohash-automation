@@ -8,6 +8,7 @@ import 'dotenv/config';
 import { userRouter } from './Routes/user.route.js';
 import subAdmin from './Routes/subAdmin.route.js';
 import createNewsRoutes from "./Routes/createNews.route.js";
+import fileUpload from 'express-fileupload';
 
 
 async function dbConnect() {
@@ -24,6 +25,10 @@ dbConnect();
 
 app.use(express.json());
 app.use(cors());
+app.use(fileUpload({
+  useTempFiles: false,  // keep files in memory as buffers
+  limits: { fileSize: 200 * 1024 * 1024 }, // limit to 200MB 
+}));
 
 //body  parser setup
 app.use(express.urlencoded({ extended: true }));

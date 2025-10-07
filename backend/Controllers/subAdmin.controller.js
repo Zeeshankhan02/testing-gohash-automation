@@ -23,7 +23,7 @@ export const loginPost = async function (req, res) {
 
     // 3. Generate JWT
     const token = jwt.sign(
-      { id: subAdmin._id,},
+      { id: subAdmin._id, },
       process.env.JWT_SECRET, // use .env
     );
 
@@ -40,23 +40,26 @@ export const loginPost = async function (req, res) {
   } catch (error) {
     console.error("Login Error:", error);
     return res.status(500).json({ msg: "Internal Server Error" });
-    
+
   }
 };
 
-
 export const uploadMedia = async (req, res) => {
+  let uploadedPublicId = null
   try {
-    if (!req.file) {
+    const file = req.files?.media
+    if (!file) {
       return res.status(400).json({ success: false, msg: "Video file not selected" });
     }
 
     // Upload to Cloudinary
-    const cloudinaryResponse = await uploadOnCloudinary(req.file.path);
+    const cloudinaryResponse = await uploadOnCloudinary(file.data);
     if (!cloudinaryResponse) {
       return res.status(500).json({ success: false, msg: "Upload to Cloudinary failed" });
     }
 
+    console.log("uploaded to cloud", cloudinaryResponse.secure_url);
+    uploadedPublicId = cloudinaryResponse.public_id
     const videoUrl = cloudinaryResponse.secure_url;
     const payload = {
       title: req.body.title || "Untitled Video",
@@ -66,66 +69,89 @@ export const uploadMedia = async (req, res) => {
     };
 
     // Call Make.com
-    const makeResponse = await axios.post(process.env.MAKE_WEBHOOK_URL, payload, {
-      headers: { "Content-Type": "application/json" },
-    });
+    let makeResponse;
+    try {
+      makeResponse = await axios.post(process.env.MAKE_WEBHOOK_URL, payload, {
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (err) {
+      console.error("Make.com request failed:", err.response?.data || err.message);
+      return res.status(502).json({ success: false, msg: "Make.com webhook failed", details: err.response?.data });
+    }
+
+    // Check if Make returned success
+    if (!makeResponse.data.success) {
+      await deleteOnCloudinary(uploadedPublicId, "video");
+      return res.status(500).json({
+        success: false,
+        msg: `Failed to upload on ${makeResponse.data.platform || "socials"}`,
+        details: makeResponse.data.message || "Unknown error",
+      });
+    }
+
+    // Safe fallback for YouTube videoId
+    const youtubeId = makeResponse.data.youtube?.videoId || null;
 
     // Save to DB
     const news = new createNewsModel({
       title: payload.title,
       description: payload.description,
-      youtubeIframe: `https://www.youtube.com/watch?v=${makeResponse.data.youtube.videoId}`,
+      youtubeIframe: youtubeId ? `https://www.youtube.com/watch?v=${youtubeId}` : null,
       type: payload.type,
       createdBy: req.user.id, // Use JWT user
       cloudinaryUrl: videoUrl,
-      public_id: cloudinaryResponse.public_id //  Store for deletion later
+      public_id: cloudinaryResponse.public_id // Store for deletion later
     });
 
     await news.save();
 
     return res.status(201).json({
-      msg: payload.type === "ads" ? "Ad created successfully and uploaded to all socials" : "News created successfully and uploaded to all socials",
+      msg:
+        payload.type === "ads"
+          ? "Ad created successfully and uploaded to all socials"
+          : "News created successfully and uploaded to all socials",
       news
     });
 
   } catch (error) {
-    console.error("Upload Error:", error);
+   console.error("Upload Error:", error);
 
-    // Cleanup Cloudinary file if something fails
-    if (req.file?.path) {
-      try {
-        await deleteOnCloudinary(req.file.path);
-      } catch (err) {
-        console.error("Cloudinary cleanup failed:", err);
+    // Cleanup on unexpected error
+    if (uploadedPublicId) {
+            try {
+        await deleteOnCloudinary(uploadedPublicId, "video");
+        console.log("Deleted from Cloudinary after unexpected error");
+      } catch (cleanupErr) {
+        console.error("Cloudinary cleanup failed:", cleanupErr);
       }
     }
 
-    return res.status(500).json({ success: false, msg: "Internal Server Error" });
+    res.status(500).json({ success: false, msg: "Something went wrong during upload" });
   }
 };
 
 
-export const viewNewsCreated = async (req,res) => {
-  
+export const viewNewsCreated = async (req, res) => {
+
   try {
 
     const allNewsArticles = await createNewsModel.find({
-      createdBy:req.user.id,
+      createdBy: req.user.id,
       type: { $in: ["dailyBulletin", "general"] }
     })
 
     if (!allNewsArticles) return res.json({
-      msg:"No articles found"
+      msg: "No articles found"
     })
 
     res.json({
-      msg:"All news articles Fetched successfully",
-      articlesCreated:allNewsArticles
+      msg: "All news articles Fetched successfully",
+      articlesCreated: allNewsArticles
     })
-    
+
   } catch (error) {
     return res.josn({
-      msg:"internal server error"
+      msg: "internal server error"
     })
   }
 
@@ -133,23 +159,23 @@ export const viewNewsCreated = async (req,res) => {
 }
 
 
-export const deleteNews = async (req,res) => {
-  const {articleId} =req.params
+export const deleteNews = async (req, res) => {
+  const { articleId } = req.params
   try {
     const deleteNews = await createNewsModel.findByIdAndDelete(articleId)
 
     if (!deleteNews) return res.status(400).json({
-      msg:"Failed to delete"
+      msg: "Failed to delete"
     })
 
     res.status(200).json({
-      msg:"deleted successfully",
-      news:deleteNews
+      msg: "deleted successfully",
+      news: deleteNews
     })
 
   } catch (error) {
     res.status(500).json({
-      msg:"Internal server error"
+      msg: "Internal server error"
     })
   }
 }

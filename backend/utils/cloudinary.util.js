@@ -1,42 +1,52 @@
-import {v2 as cloudinary } from "cloudinary"
-import fs from "fs"
+import { v2 as cloudinary } from "cloudinary"
+import streamifier from "streamifier";
 
- // Configuration
- cloudinary.config({ 
-  cloud_name:process.env.CLOUDINARY_CLOUD_NAME, 
-  api_key:process.env.CLOUDINARY_API_KEY, 
-  api_secret:process.env.CLOUDINARY_SECRET_KEY  
+// Configuration
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_SECRET_KEY
 });
 
+const uploadOnCloudinary = async (buffer) => {
+  if (!buffer) return null;
 
-const uploadOnCloudinary=async (localFilePath) => {
   try {
-    if (!localFilePath) return null
+    const result = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          resource_type: "video",
+          folder: "clientUploads",
+          timeout: 120000
+        },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      );
 
-    // upload the file on cloudinary
+      // Convert buffer → readable stream and pipe into upload stream
+      streamifier.createReadStream(buffer).pipe(uploadStream);
+    });
 
-    const response = await cloudinary.uploader.upload(localFilePath,{
-      resource_type:"video",
-      folder: "clientVideos"
-    })
-
-     fs.unlinkSync(localFilePath) //deleting the video from the local server after successfull upload
-    return response
+    return result;
   } catch (error) {
-    fs.unlinkSync(localFilePath) // removes the locally saved temp file if the upload operatoin failed
-    return null
+    console.error("Cloudinary upload failed:", error);
+    return null;
   }
-}
+};
 
-const deleteOnCloudinary=async(publicId)=>{
-  const response = await cloudinary.uploader.destroy(publicId,{
+const deleteOnCloudinary = async (publicId) => {
+  const response = await cloudinary.uploader.destroy(publicId, {
     resource_type: "video",
   })
 
   if (!response) {
-    throw new Error(500,"Error while deleting")
+    throw new Error(500, "Error while deleting")
   }
+  console.log("deleted from cloudinary");
+  
   return response
 }
 
-export {uploadOnCloudinary,deleteOnCloudinary}
+export { uploadOnCloudinary, deleteOnCloudinary }
