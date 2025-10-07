@@ -1,4 +1,3 @@
-const app = express();
 import express from 'express';
 import cors from 'cors';
 import { superAdminRouter } from './Routes/superAdmin.route.js';
@@ -22,6 +21,7 @@ async function dbConnect() {
 }
 
 dbConnect();
+const app = express();
 
 app.use(express.json());
 app.use(cors());
